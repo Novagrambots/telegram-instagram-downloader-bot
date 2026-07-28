@@ -6,6 +6,11 @@ alembic==1.14.1
 yt-dlp==2025.3.31
 pydantic-settings==2.8.1
 
+# Instagram private API — эмулирует мобильное приложение (Stories, посты, аватарки)
+instagrapi==2.18.11
+# instagrapi тянет свежий pydantic, а aiogram 3.26 требует <2.13 — держим в рамках
+pydantic>=2.4.1,<2.13
+
 # Утилиты
 aiofiles==24.1.0
 python-dotenv==1.0.1

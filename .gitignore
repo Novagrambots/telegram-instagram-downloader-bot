@@ -5,6 +5,9 @@ venv/
 # переменные окружения
 .env
 
+# сессии Instagram — это доступ к аккаунтам, в git им не место
+sessions/
+
 # кэш Python
 __pycache__/
 *.py[cod]

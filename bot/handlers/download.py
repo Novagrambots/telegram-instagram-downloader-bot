@@ -211,11 +211,13 @@ async def _alert_session_dead(bot) -> None:
     await notify_admins(
         bot,
         f"{E['warning']} <b>Instagram-аккаунты заблокированы!</b>\n\n"
-        "Все INSTAGRAM_SESSION_ID под ограничением (challenge/feedback). "
+        "Все аккаунты под ограничением (challenge/feedback). "
         "Не работают: посты (fallback), Stories, аватарки, inline-режим.\n\n"
-        "Действие: зайди в аккаунт(ы) через браузер, пройди проверку «это вы», "
-        "обнови INSTAGRAM_SESSION_ID в .env и перезапусти "
-        "(<code>docker compose restart bot</code>)",
+        "Проверить какие живы:\n"
+        "<code>docker compose exec bot python -m bot.check_session</code>\n\n"
+        "Действие: зайди в аккаунт через приложение, пройди проверку «это вы», "
+        "потом перелогинь его:\n"
+        "<code>docker compose exec bot python -m bot.login_account</code>",
     )
 
 

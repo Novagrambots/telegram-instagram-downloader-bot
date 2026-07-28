@@ -14,6 +14,9 @@ services:
     volumes:
       # доступ к файлам Local Bot API для фоновой очистки
       - bot-api-data:/var/lib/telegram-bot-api
+      # сессии Instagram — должны пережить пересборку контейнера,
+      # иначе придётся логиниться заново (а лишний логин = риск бана)
+      - ./sessions:/app/sessions
 
   # Local Bot API — файлы до 2 ГБ без ограничений
   bot-api:

@@ -4,6 +4,7 @@ venv/
 __pycache__/
 *.pyc
 *.session
+sessions/
 .crash_flag
 PROJECT_LOG.md
 AGENTS.md

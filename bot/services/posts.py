@@ -1,23 +1,19 @@
-"""Сервис скачивания постов Instagram через private API + sessionid.
+"""Сервис скачивания постов Instagram через private API (instagrapi).
 Fallback на случай когда Cobalt не смог (error.api.fetch.empty и т.д.).
 Поддерживает: фото, видео, карусели.
 """
-import asyncio
 import logging
 import os
 import re
 import uuid
 
 import aiohttp
+from instagrapi.exceptions import ClientNotFoundError, MediaNotFound
 
-from bot.services.session_pool import (
-    check_flagged,
-    get_sessionid,
-    has_any_session,
-    with_rotation,
-)
+from bot.services import session_pool as pool
+from bot.services.session_pool import has_any_session, with_rotation
 from bot.services.stories import (
-    INSTAGRAM_HEADERS,
+    NO_ACCOUNTS_ERROR,
     create_session,
     pick_inline_video_url,
 )
@@ -53,33 +49,12 @@ def shortcode_to_media_pk(shortcode: str) -> int:
     return pk
 
 
-async def get_media_info(session: aiohttp.ClientSession, media_pk: int) -> dict:
-    """Получает инфо о посте через private API (с ретраем при 429)"""
-    url = f"https://i.instagram.com/api/v1/media/{media_pk}/info/"
-    sid = get_sessionid()
-    cookies = {"sessionid": sid}
-
-    # ретрай при 429
-    for attempt in range(3):
-        async with session.get(
-            url, headers=INSTAGRAM_HEADERS, cookies=cookies,
-            timeout=aiohttp.ClientTimeout(total=10),
-        ) as resp:
-            if resp.status == 429:
-                delay = 5 * (attempt + 1)
-                logger.warning(f"429 от Instagram, ждём {delay}с (попытка {attempt + 1}/3)")
-                await asyncio.sleep(delay)
-                continue
-            if resp.status == 404:
-                raise RuntimeError("Пост не найден (404) — удалён или ссылка неправильная")
-            if resp.status != 200:
-                # аккаунт под ограничением (challenge/feedback/401/403)? уводим в кулдаун
-                check_flagged(sid, resp.status, await resp.text())
-                raise RuntimeError(f"Не удалось получить пост: HTTP {resp.status}")
-            data = await resp.json()
-            break
-    else:
-        raise RuntimeError("Instagram блокирует запросы (429)")
+async def get_media_info(media_pk: int) -> dict:
+    """Получает инфо о посте сырым JSON — нужны все версии видео, а не только лучшая"""
+    try:
+        data = await pool.private_request(f"media/{media_pk}/info/")
+    except (MediaNotFound, ClientNotFoundError) as e:
+        raise RuntimeError("Пост не найден (404) — удалён или ссылка неправильная") from e
 
     items = data.get("items", [])
     if not items:
@@ -125,10 +100,7 @@ async def get_post_media_urls(url: str) -> list[dict]:
     Каждый элемент: {url, media_type, thumb}
     """
     if not has_any_session():
-        raise RuntimeError(
-            "Для inline-режима нужна авторизация.\n"
-            "Добавь INSTAGRAM_SESSION_ID в .env"
-        )
+        raise RuntimeError(NO_ACCOUNTS_ERROR)
     return await with_rotation(lambda: _get_post_media_urls_impl(url))
 
 
@@ -136,11 +108,11 @@ async def _get_post_media_urls_impl(url: str) -> list[dict]:
     shortcode = parse_post_shortcode(url)
     media_pk = shortcode_to_media_pk(shortcode)
 
-    async with create_session() as session:
-        post = await get_media_info(session, media_pk)
-        medias = post.get("carousel_media") or [post]
+    post = await get_media_info(media_pk)
+    medias = post.get("carousel_media") or [post]
 
-        results = []
+    results = []
+    async with create_session() as session:
         for item in medias:
             # превью всегда есть в image_versions2 (у видео это обложка)
             candidates = item.get("image_versions2", {}).get("candidates", [])
@@ -172,10 +144,7 @@ async def download_post(url: str, download_dir: str) -> list[dict]:
     Возвращает список {file_path, media_type, title} — как download_story.
     """
     if not has_any_session():
-        raise RuntimeError(
-            "Для скачивания через private API нужна авторизация.\n"
-            "Добавь INSTAGRAM_SESSION_ID в .env"
-        )
+        raise RuntimeError(NO_ACCOUNTS_ERROR)
     return await with_rotation(lambda: _download_post_impl(url, download_dir))
 
 
@@ -184,16 +153,16 @@ async def _download_post_impl(url: str, download_dir: str) -> list[dict]:
     media_pk = shortcode_to_media_pk(shortcode)
     logger.info(f"Post fallback: shortcode={shortcode}, pk={media_pk}")
 
+    post = await get_media_info(media_pk)
+
+    # карусель — несколько элементов, иначе один
+    medias = post.get("carousel_media") or [post]
+
+    # уникальный суффикс — чтобы параллельные запросы не затирали файлы друг друга
+    uid = uuid.uuid4().hex[:8]
+
+    results = []
     async with create_session() as session:
-        post = await get_media_info(session, media_pk)
-
-        # карусель — несколько элементов, иначе один
-        medias = post.get("carousel_media") or [post]
-
-        # уникальный суффикс — чтобы параллельные запросы не затирали файлы друг друга
-        uid = uuid.uuid4().hex[:8]
-
-        results = []
         try:
             for i, item in enumerate(medias):
                 media_url, media_type = _pick_media_url(item)
@@ -218,4 +187,4 @@ async def _download_post_impl(url: str, download_dir: str) -> list[dict]:
                     pass
             raise
 
-        return results
+    return results

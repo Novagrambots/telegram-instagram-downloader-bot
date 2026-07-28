@@ -26,10 +26,16 @@ class Settings(BaseSettings):
     # Cobalt API (для скачивания фото и видео)
     cobalt_api_url: str = "http://localhost:9000"
 
-    # Instagram sessionid (для скачивания Stories)
-    instagram_session_id: str = ""
+    # Папка с файлами сессий Instagram (создаются через python -m bot.login_account)
+    instagram_sessions_dir: str = "sessions"
 
-    # Прокси для Instagram API (SSH-туннель или резидентный прокси)
+    # Гео устройства — должно совпадать с гео прокси, иначе Instagram видит рассинхрон.
+    # Применяется только при логине нового аккаунта, у живого локаль не меняется
+    instagram_locale: str = "en_US"
+    instagram_country: str = "US"
+    instagram_tz_offset: int = 0  # смещение от UTC в секундах (напр. UZT +5ч = 18000)
+
+    # Прокси для Instagram API (резидентный прокси, желательно sticky)
     instagram_proxy: str = ""
 
     # Local Bot API (пустая строка = стандартный API Telegram)
