@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     # Прокси для Instagram API (резидентный прокси, желательно sticky)
     instagram_proxy: str = ""
 
+    # Прокси для анонимных viewer-сайтов. По умолчанию пусто — они не Instagram,
+    # банить по IP не спешат, а лишний прокси это лишняя точка отказа
+    scraper_proxy: str = ""
+
     # Local Bot API (пустая строка = стандартный API Telegram)
     local_bot_api_url: str = ""
 

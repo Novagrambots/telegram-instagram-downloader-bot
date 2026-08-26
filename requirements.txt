@@ -11,6 +11,9 @@ instagrapi==2.18.11
 # instagrapi тянет свежий pydantic, а aiogram 3.26 требует <2.13 — держим в рамках
 pydantic>=2.4.1,<2.13
 
+# headless-браузер для анонимных viewer-сайтов (Stories без аккаунтов)
+playwright==1.62.0
+
 # Утилиты
 aiofiles==24.1.0
 python-dotenv==1.0.1

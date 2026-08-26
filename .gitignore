@@ -25,6 +25,7 @@ __pycache__/
 # служебные папки агентов
 .beads/
 .claude/
+.playwright-mcp/
 
 # локальные базы
 *.db

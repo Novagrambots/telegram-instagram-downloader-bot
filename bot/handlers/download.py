@@ -328,7 +328,8 @@ def _get_error_text(error: str, lang: str = "ru") -> str:
 
     if "session" in error_lower and "авторизация" in error_lower:
         return t("error.session", lang)
-    elif "истории не найдены" in error_lower or "истекли" in error_lower:
+    elif ("истории не найдены" in error_lower or "истекли" in error_lower
+          or "нет активных историй" in error_lower):
         return t("error.story_expired", lang)
     elif "private" in error_lower or "login" in error_lower:
         return t("error.private", lang)

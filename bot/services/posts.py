@@ -7,14 +7,13 @@ import os
 import re
 import uuid
 
-import aiohttp
 from instagrapi.exceptions import ClientNotFoundError, MediaNotFound
 
 from bot.services import session_pool as pool
 from bot.services.session_pool import has_any_session, with_rotation
 from bot.services.stories import (
     NO_ACCOUNTS_ERROR,
-    create_session,
+    fetch_media,
     pick_inline_video_url,
 )
 
@@ -74,22 +73,15 @@ def _pick_media_url(item: dict) -> tuple[str, str]:
     return candidates[0]["url"], "photo"
 
 
-async def _download_file(
-    session: aiohttp.ClientSession, media_url: str, file_path: str
-) -> None:
+async def _download_file(media_url: str, file_path: str) -> None:
     """Скачивает файл по URL на диск"""
-    async with session.get(
-        media_url, timeout=aiohttp.ClientTimeout(total=60)
-    ) as resp:
-        if resp.status != 200:
-            raise RuntimeError(f"Не удалось скачать медиа: HTTP {resp.status}")
-        content = await resp.read()
+    content = await fetch_media(media_url, timeout=60)
 
-        if len(content) > 2000 * 1024 * 1024:
-            raise RuntimeError("Файл больше 2 ГБ — лимит локального Telegram API")
+    if len(content) > 2000 * 1024 * 1024:
+        raise RuntimeError("Файл больше 2 ГБ — лимит локального Telegram API")
 
-        with open(file_path, "wb") as f:
-            f.write(content)
+    with open(file_path, "wb") as f:
+        f.write(content)
 
     size_mb = len(content) / (1024 * 1024)
     logger.info(f"Скачано: {file_path} ({size_mb:.1f} МБ)")
@@ -112,26 +104,25 @@ async def _get_post_media_urls_impl(url: str) -> list[dict]:
     medias = post.get("carousel_media") or [post]
 
     results = []
-    async with create_session() as session:
-        for item in medias:
-            # превью всегда есть в image_versions2 (у видео это обложка)
-            candidates = item.get("image_versions2", {}).get("candidates", [])
-            thumb = candidates[-1]["url"] if candidates else None
+    for item in medias:
+        # превью всегда есть в image_versions2 (у видео это обложка)
+        candidates = item.get("image_versions2", {}).get("candidates", [])
+        thumb = candidates[-1]["url"] if candidates else None
 
-            if item.get("video_versions"):
-                media_url = await pick_inline_video_url(session, item)
-                media_type = "video"
-            else:
-                if not candidates:
-                    continue  # нет ни видео, ни фото — пропускаем элемент
-                media_url = candidates[0]["url"]
-                media_type = "photo"
+        if item.get("video_versions"):
+            media_url = await pick_inline_video_url(item)
+            media_type = "video"
+        else:
+            if not candidates:
+                continue  # нет ни видео, ни фото — пропускаем элемент
+            media_url = candidates[0]["url"]
+            media_type = "photo"
 
-            results.append({
-                "url": media_url,
-                "media_type": media_type,
-                "thumb": thumb,
-            })
+        results.append({
+            "url": media_url,
+            "media_type": media_type,
+            "thumb": thumb,
+        })
 
     if not results:
         raise RuntimeError("Не удалось найти медиа в посте")
@@ -162,29 +153,28 @@ async def _download_post_impl(url: str, download_dir: str) -> list[dict]:
     uid = uuid.uuid4().hex[:8]
 
     results = []
-    async with create_session() as session:
-        try:
-            for i, item in enumerate(medias):
-                media_url, media_type = _pick_media_url(item)
-                ext = ".mp4" if media_type == "video" else ".jpg"
-                file_path = os.path.join(
-                    download_dir, f"post_{shortcode}_{uid}_{i}{ext}"
-                )
-                await _download_file(session, media_url, file_path)
+    try:
+        for i, item in enumerate(medias):
+            media_url, media_type = _pick_media_url(item)
+            ext = ".mp4" if media_type == "video" else ".jpg"
+            file_path = os.path.join(
+                download_dir, f"post_{shortcode}_{uid}_{i}{ext}"
+            )
+            await _download_file(media_url, file_path)
 
-                title = "Instagram Reels" if media_type == "video" else "Instagram Фото"
-                results.append({
-                    "file_path": file_path,
-                    "media_type": media_type,
-                    "title": title,
-                })
-        except Exception:
-            # не бросаем недокачанную карусель на диске — чистим за собой
-            for r in results:
-                try:
-                    os.remove(r["file_path"])
-                except OSError:
-                    pass
-            raise
+            title = "Instagram Reels" if media_type == "video" else "Instagram Фото"
+            results.append({
+                "file_path": file_path,
+                "media_type": media_type,
+                "title": title,
+            })
+    except Exception:
+        # не бросаем недокачанную карусель на диске — чистим за собой
+        for r in results:
+            try:
+                os.remove(r["file_path"])
+            except OSError:
+                pass
+        raise
 
     return results

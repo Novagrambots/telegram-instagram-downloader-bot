@@ -19,6 +19,7 @@ from bot.emojis import E
 from bot.handlers import admin, download, inline, start
 from bot.i18n import get_bot_commands
 from bot.middlewares.rate_limit import RateLimitMiddleware
+from bot.services import story_scraper
 from bot.middlewares.subscription import SubscriptionMiddleware
 
 # настраиваем логирование
@@ -125,6 +126,9 @@ async def on_shutdown(bot: Bot) -> None:
     # убираем флаг — остановка штатная, не crash
     if os.path.exists(_CRASH_FLAG):
         os.remove(_CRASH_FLAG)
+
+    # гасим Chromium — иначе останется висеть в памяти
+    await story_scraper.shutdown()
 
     await engine.dispose()
     logger.info("Бот остановлен, соединение с БД закрыто")

@@ -315,9 +315,9 @@ TRANSLATIONS = {
 
     # === Ошибки ===
     "error.session": {
-        "ru": f"{E['lock']} <b>Нужна авторизация</b>\n\nДля скачивания Stories нужен INSTAGRAM_SESSION_ID.",
-        "uz": f"{E['lock']} <b>Avtorizatsiya kerak</b>\n\nStories yuklab olish uchun INSTAGRAM_SESSION_ID kerak.",
-        "en": f"{E['lock']} <b>Authorization required</b>\n\nINSTAGRAM_SESSION_ID is needed to download Stories.",
+        "ru": f"{E['lock']} <b>Сейчас не получается</b>\n\nStories временно недоступны. Попробуй через пару минут.",
+        "uz": f"{E['lock']} <b>Hozir imkoni yo'q</b>\n\nStories vaqtincha ishlamayapti. Bir necha daqiqadan keyin urinib ko'ring.",
+        "en": f"{E['lock']} <b>Not available right now</b>\n\nStories are temporarily unavailable. Try again in a couple of minutes.",
     },
     "error.story_expired": {
         "ru": f"{E['clock']} <b>История не найдена</b>\n\nВозможно, она уже истекла (24 часа) или аккаунт приватный.",

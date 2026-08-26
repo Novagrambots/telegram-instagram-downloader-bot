@@ -24,7 +24,8 @@ Telegram-бот для скачивания видео, Reels, фото, кар�
 - **Python 3.12** + **aiogram 3** — асинхронный Telegram Bot API
 - **PostgreSQL 16** + **SQLAlchemy 2.0** (async, asyncpg) — база данных
 - **Cobalt API** (Docker) — движок скачивания видео/Reels/фото
-- **instagrapi** — Instagram Private API для Stories, аватарок и fallback постов
+- **Playwright** — анонимные viewer-сайты: Stories и аватарки без Instagram-аккаунтов
+- **instagrapi** — Instagram Private API, резервный путь (умеет закрытые профили)
 - **Telegram Local Bot API** — поддержка файлов до 2 ГБ
 - **aiohttp** + **aiohttp-socks** — HTTP-клиент с поддержкой HTTP/HTTPS/SOCKS4/SOCKS5 прокси
 - **pydantic-settings** — конфигурация
@@ -57,8 +58,9 @@ bot_4_insta/
 │   │   └── subscription.py    # Проверка подписки
 │   ├── services/
 │   │   ├── instagram.py       # Cobalt API клиент
+│   │   ├── story_scraper.py   # Анонимные viewer-сайты через Playwright
 │   │   ├── session_pool.py    # Пул Instagram-аккаунтов + ротация
-│   │   ├── stories.py         # Stories через private API
+│   │   ├── stories.py         # Stories: скрапер → аккаунты
 │   │   ├── posts.py           # Посты через private API (fallback Cobalt)
 │   │   └── profile.py         # Аватарки профилей
 │   └── utils/
@@ -79,7 +81,7 @@ git clone <repo-url> && cd bot_4_insta
 
 # 2. Настройки
 cp .env.example .env
-# заполнить .env (BOT_TOKEN, ADMIN_IDS, INSTAGRAM_SESSION_ID, API_ID, API_HASH)
+# заполнить .env (BOT_TOKEN, ADMIN_IDS, API_ID, API_HASH)
 
 # 3. Запуск (поднимает бот, PostgreSQL, Cobalt, Local Bot API)
 docker compose up -d --build
@@ -108,7 +110,8 @@ python -m bot.main
 | `BOT_TOKEN` | Токен от @BotFather |
 | `ADMIN_IDS` | Telegram ID админов (через запятую) |
 | `INSTAGRAM_SESSIONS_DIR` | Папка с файлами сессий Instagram (по умолчанию `sessions`) |
-| `INSTAGRAM_PROXY` | URL прокси (HTTP/HTTPS/SOCKS4/SOCKS5), резидентный и sticky |
+| `INSTAGRAM_PROXY` | URL прокси для private API (резидентный, sticky) |
+| `SCRAPER_PROXY` | Прокси для viewer-сайтов, по умолчанию пусто (напрямую) |
 | `INSTAGRAM_LOCALE`, `INSTAGRAM_COUNTRY`, `INSTAGRAM_TZ_OFFSET` | Гео устройства — под гео прокси |
 | `COBALT_API_URL` | URL Cobalt API |
 | `LOCAL_BOT_API_URL` | URL Local Bot API (для файлов >50 МБ) |
@@ -116,10 +119,22 @@ python -m bot.main
 | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | Параметры PostgreSQL |
 | `CACHE_TTL_DAYS` | TTL кэша скачиваний (по умолчанию 30) |
 
-## 📸 Instagram-аккаунты
+## 📸 Источники контента
 
-Stories, аватарки и fallback постов работают через private API — для него нужен
-залогиненный аккаунт. Reels и фото качаются через Cobalt и аккаунт не требуют.
+| Что качаем | Через что | Нужен аккаунт |
+|-----------|-----------|---------------|
+| Reels, фото, карусели | Cobalt API | нет |
+| **Stories** | анонимные viewer-сайты (Playwright) | **нет** |
+| **Аватарки** | анонимные viewer-сайты (Playwright) | **нет** |
+| Закрытые профили, fallback постов | Instagram private API | да |
+
+Основной путь для Stories — анонимные viewer-сайты: браузер открывает страницу,
+её JS подписывает запрос, а мы забираем JSON. Структура ответа совпадает с private
+API, медиа качается напрямую с CDN Instagram. Аккаунты для этого не нужны.
+
+Instagram-аккаунты остаются резервом. Они умеют то, чего анонимные сервисы не
+могут: закрытые профили, на которые подписан аккаунт. Без аккаунтов бот работает,
+просто закрытые профили будут недоступны.
 
 ```bash
 # добавить аккаунт (спросит логин и пароль, при необходимости — код с почты)
@@ -160,7 +175,7 @@ docker compose exec bot python -m bot.check_session
 - 📣 **Рассылка** — массовое сообщение всем юзерам (FSM с подтверждением)
 - 🏠 **Главное меню** — вернуться в бота
 
-Также приходят алерты при протухании `INSTAGRAM_SESSION_ID`.
+Также приходят алерты, когда все Instagram-аккаунты уходят в кулдаун.
 
 ## 📄 Лицензия
 
