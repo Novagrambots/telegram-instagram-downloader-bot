@@ -10,6 +10,7 @@ import uuid
 from instagrapi.exceptions import ClientNotFoundError, MediaNotFound
 
 from bot.services import session_pool as pool
+from bot.services import story_scraper
 from bot.services.session_pool import has_any_session, with_rotation
 from bot.services.stories import (
     NO_ACCOUNTS_ERROR,
@@ -91,6 +92,13 @@ async def get_post_media_urls(url: str) -> list[dict]:
     """Возвращает прямые CDN-ссылки медиа поста БЕЗ скачивания (для inline-режима).
     Каждый элемент: {url, media_type, thumb}
     """
+    try:
+        items = await story_scraper.fetch_post(url)
+        logger.info(f"Пост {url} получен анонимно ({len(items)} медиа)")
+        return items
+    except Exception as e:
+        logger.warning(f"Анонимный источник не дал пост {url}: {e}")
+
     if not has_any_session():
         raise RuntimeError(NO_ACCOUNTS_ERROR)
     return await with_rotation(lambda: _get_post_media_urls_impl(url))
@@ -130,10 +138,51 @@ async def _get_post_media_urls_impl(url: str) -> list[dict]:
     return results
 
 
+def _title_for(media_type: str) -> str:
+    return "Instagram Reels" if media_type == "video" else "Instagram Фото"
+
+
+async def _save_items(items: list[dict], shortcode: str, download_dir: str) -> list[dict]:
+    """Качает список {url, media_type} на диск. При сбое чистит уже скачанное,
+    чтобы не оставлять на диске половину карусели.
+    """
+    # уникальный суффикс — чтобы параллельные запросы не затирали файлы друг друга
+    uid = uuid.uuid4().hex[:8]
+    results: list[dict] = []
+    try:
+        for i, item in enumerate(items):
+            media_type = item["media_type"]
+            ext = ".mp4" if media_type == "video" else ".jpg"
+            file_path = os.path.join(download_dir, f"post_{shortcode}_{uid}_{i}{ext}")
+            await _download_file(item["url"], file_path)
+            results.append({
+                "file_path": file_path,
+                "media_type": media_type,
+                "title": _title_for(media_type),
+            })
+    except Exception:
+        for r in results:
+            try:
+                os.remove(r["file_path"])
+            except OSError:
+                pass
+        raise
+    return results
+
+
 async def download_post(url: str, download_dir: str) -> list[dict]:
-    """Скачивает пост (фото/видео/карусель) через private API.
+    """Скачивает пост (фото/видео/карусель): сначала анонимные сервисы, потом аккаунты.
     Возвращает список {file_path, media_type, title} — как download_story.
     """
+    shortcode = parse_post_shortcode(url)
+
+    try:
+        items = await story_scraper.fetch_post(url)
+        logger.info(f"Пост {shortcode} получен анонимно ({len(items)} медиа)")
+        return await _save_items(items, shortcode, download_dir)
+    except Exception as e:
+        logger.warning(f"Анонимный источник не дал пост {shortcode}: {e}")
+
     if not has_any_session():
         raise RuntimeError(NO_ACCOUNTS_ERROR)
     return await with_rotation(lambda: _download_post_impl(url, download_dir))
@@ -149,32 +198,9 @@ async def _download_post_impl(url: str, download_dir: str) -> list[dict]:
     # карусель — несколько элементов, иначе один
     medias = post.get("carousel_media") or [post]
 
-    # уникальный суффикс — чтобы параллельные запросы не затирали файлы друг друга
-    uid = uuid.uuid4().hex[:8]
+    items = []
+    for item in medias:
+        media_url, media_type = _pick_media_url(item)
+        items.append({"url": media_url, "media_type": media_type})
 
-    results = []
-    try:
-        for i, item in enumerate(medias):
-            media_url, media_type = _pick_media_url(item)
-            ext = ".mp4" if media_type == "video" else ".jpg"
-            file_path = os.path.join(
-                download_dir, f"post_{shortcode}_{uid}_{i}{ext}"
-            )
-            await _download_file(media_url, file_path)
-
-            title = "Instagram Reels" if media_type == "video" else "Instagram Фото"
-            results.append({
-                "file_path": file_path,
-                "media_type": media_type,
-                "title": title,
-            })
-    except Exception:
-        # не бросаем недокачанную карусель на диске — чистим за собой
-        for r in results:
-            try:
-                os.remove(r["file_path"])
-            except OSError:
-                pass
-        raise
-
-    return results
+    return await _save_items(items, shortcode, download_dir)

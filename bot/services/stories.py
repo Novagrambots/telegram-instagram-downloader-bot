@@ -38,7 +38,7 @@ __all__ = ["SessionExpiredError", "AllSessionsExpiredError", "ScraperError"]
 
 # что сказать, когда не сработал ни один источник
 NO_ACCOUNTS_ERROR = (
-    "Не удалось получить историю.\n"
+    "Не удалось получить контент.\n"
     "Анонимные сервисы недоступны, а Instagram-аккаунтов нет. "
     "Добавить: docker compose exec bot python -m bot.login_account"
 )

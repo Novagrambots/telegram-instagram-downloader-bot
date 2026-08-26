@@ -12,6 +12,7 @@ video_versions, pk. Поэтому дальше работает тот же р�
 """
 import asyncio
 import logging
+from urllib.parse import parse_qs, urlparse
 
 from bot.config import settings
 
@@ -56,6 +57,30 @@ async ({ endpoint, payload }) => {
   return JSON.parse(text);
 }
 """
+
+# Эндпоинт /api/convert принимает ссылку на пост. Важно: URL передаётся строкой —
+# функция подписи сама завернёт его в sf_url. Если передать объектом, подпись не сойдётся.
+_CONVERT_JS = """
+async ({ url }) => {
+  const root = document.querySelector('[data-v-app], #app');
+  const app = root && root.__vue_app__;
+  const msc = app && app.config && app.config.globalProperties
+    && app.config.globalProperties.$mediaSearchController;
+  if (!msc) throw new Error('контроллер сайта не найден — вёрстка изменилась');
+
+  const body = await msc.subscribeSignedRequestBody(url);
+  const host = msc.workerHubDomain || 'api-wh.anonyig.com';
+  const resp = await fetch(`https://${host}/api/convert`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'accept': 'application/json, text/plain, */*' },
+    body: JSON.stringify(body),
+  });
+  const text = await resp.text();
+  if (!resp.ok) throw new Error(`convert вернул ${resp.status}: ${text.slice(0, 200)}`);
+  return JSON.parse(text);
+}
+"""
+
 
 # Playwright синхронизируем: один браузер на процесс, запросы по очереди —
 # параллельный обстрел с одного IP эти сайты режут так же, как Instagram
@@ -122,30 +147,87 @@ async def _ensure_page(site: str):
     return page
 
 
-async def _call_on_site(site: str, endpoint: str, payload: dict) -> dict:
-    """Один вызов API через конкретное зеркало"""
+async def _call_on_site(site: str, script: str, arg: dict) -> dict:
+    """Один вызов через конкретное зеркало"""
     page = await _ensure_page(site)
     return await asyncio.wait_for(
-        page.evaluate(_CALL_API_JS, {"endpoint": endpoint, "payload": payload}),
+        page.evaluate(script, arg),
         timeout=_API_TIMEOUT_MS / 1000,
     )
 
 
-async def call_api(endpoint: str, payload: dict) -> dict:
-    """Дёргает эндпоинт viewer-сайта, перебирая зеркала до первого удачного"""
+async def _run_with_mirrors(script: str, arg: dict, what: str) -> dict:
+    """Гоняет вызов по зеркалам до первого удачного"""
     errors = []
 
     async with _lock:
         for site in SCRAPER_SITES:
             try:
-                return await _call_on_site(site, endpoint, payload)
+                return await _call_on_site(site, script, arg)
             except Exception as e:
-                logger.warning(f"Скрапер: {site} не сработал ({type(e).__name__}: {e})")
+                logger.warning(f"Скрапер: {site} не сработал на {what} ({type(e).__name__}: {e})")
                 errors.append(f"{site}: {type(e).__name__}")
                 # страница могла умереть вместе с зеркалом — заставим переоткрыть
                 await _reset_page()
 
     raise ScraperError("Все зеркала недоступны — " + "; ".join(errors))
+
+
+async def call_api(endpoint: str, payload: dict) -> dict:
+    """Дёргает эндпоинт /api/v1/instagram/<endpoint> viewer-сайта"""
+    return await _run_with_mirrors(
+        _CALL_API_JS, {"endpoint": endpoint, "payload": payload}, endpoint
+    )
+
+
+def _direct_url(url: str) -> str:
+    """Вытаскивает прямую ссылку CDN из прокси-ссылки сайта.
+
+    Сайт отдаёт media.anonyig.com/get?...&uri=<ссылка CDN>, и у такой ссылки
+    есть срок жизни. Оригинал в параметре uri живёт дольше и не зависит от них.
+    """
+    try:
+        parsed = urlparse(url)
+        if "uri=" in (parsed.query or ""):
+            uri = parse_qs(parsed.query).get("uri", [""])[0]
+            if uri.startswith("http"):
+                return uri
+    except Exception:
+        pass
+    return url
+
+
+async def fetch_post(post_url: str) -> list[dict]:
+    """Медиа поста/Reels по ссылке. Возвращает [{url, media_type, thumb}, ...]
+
+    Внимание: карусели этот путь не отдаёт — на пост с несколькими медиа сервис
+    стабильно возвращает пустой список (проверено, три попытки подряд). Карусели
+    остаются за Cobalt (он их умеет) и private API, сюда они попадают только если
+    Cobalt уже не справился — тогда бросаем ScraperError и идём дальше по цепочке.
+    """
+    data = await _run_with_mirrors(_CONVERT_JS, {"url": post_url}, "convert")
+
+    entries = data.get("url") or []
+    if not entries:
+        raise ScraperError("Сервис не отдал медиа поста")
+
+    thumb = _direct_url(data.get("thumb") or "") or None
+
+    results = []
+    for entry in entries:
+        media_url = entry.get("url")
+        if not media_url:
+            continue
+        ext = (entry.get("ext") or entry.get("type") or "").lower()
+        results.append({
+            "url": _direct_url(media_url),
+            "media_type": "video" if ext in ("mp4", "mov", "webm") else "photo",
+            "thumb": thumb,
+        })
+
+    if not results:
+        raise ScraperError("Сервис не отдал медиа поста")
+    return results
 
 
 async def _reset_page() -> None:
